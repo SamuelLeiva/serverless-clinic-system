@@ -19,3 +19,7 @@ export interface Appointment {
     medicId?: number;
     date?: string;
 }
+
+export interface AppointmentWithId extends Appointment{
+    id: string;
+}
