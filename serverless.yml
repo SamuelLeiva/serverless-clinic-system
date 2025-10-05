@@ -166,6 +166,7 @@ functions:
           - sns:Publish
         Resource: !Ref AppointmentTopic # Referencia al tópico creado en Commit 3
 
+
 # Build nativo en Serverless v4 (reemplaza serverless-esbuild)
 build:
   esbuild: true
