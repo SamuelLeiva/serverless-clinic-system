@@ -133,12 +133,31 @@ resources:
         Name: ${self:service}-SqsReturnArn
 
 functions:
-  hello:
-    handler: src/handler.hello
+  appointment:
+    handler: src/adapters/handlers/appointmentHandler.handler
+    name: AppointmentServiceLambda-${sls:stage}
     events:
       - httpApi:
-          path: /
-          method: get
+        path: /appointment
+        method: post
+    iamRoleStatements:
+      # Permisos para DynamoDB (guardar la petición inicial y el estado final)
+      - Effect: Allow
+        Action:
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
+          - dynamodb:Query
+        Resource:
+          - !GetAtt AppointmentsTable.Arn
+          - !Join [
+              "/",
+              [!GetAtt AppointmentsTable.Arn, "index", "InsuredIdIndex"],
+            ] # Permiso para el GSI
+      # Permiso para SNS (publicar el mensaje al tópico)
+      - Effect: Allow
+        Action:
+          - sns:Publish
+        Resource: !Ref AppointmentTopic # Referencia al tópico creado en Commit 3
 
 # Build nativo en Serverless v4 (reemplaza serverless-esbuild)
 build:
