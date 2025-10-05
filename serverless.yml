@@ -11,7 +11,7 @@ provider:
 
 resources:
   Resources:
-    AppointmentsTable:
+    AppointmentsTable: #Declaración de la tabla en DynamoDB
       Type: AWS::DynamoDB::Table
       Properties:
         TableName: Appointments
@@ -32,6 +32,64 @@ resources:
                 KeyType: HASH # Clave de Partición para el GSI
             Projection:
               ProjectionType: ALL # Proyecta todos los atributos para que el listado sea completo
+
+    AppointmentTopic: #Declaración del topico SNS
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: appointment-request-topic-${sls:stage}
+
+    SqlPe: #Cola de mensajes de Perú
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: appointment-request-pe-queue-${sls:stage}
+        MessageRetentionPeriod: 1209600 # 14 días (opcional)
+
+    SqsCl: #Cola de mensajes de Chile
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: appointment-request-cl-queue-${sls:stage}
+        MessageRetentionPeriod: 1209600
+
+    #Suscripción de las colas al SNS previamente creado
+    SqsPeSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: sqs
+        Endpoint: !GetAtt SqsPe.Arn # Obtiene el ARN de la cola PE creada arriba
+        TopicArn: !Ref AppointmentTopic # Hace referencia al Tópico SNS
+        FilterPolicy: # Filtro crucial: solo acepta mensajes con countryISO: "PE"
+          countryISO:
+            - "PE"
+    SqsClSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: sqs
+        Endpoint: !GetAtt SqsCl.Arn # Obtiene el ARN de la cola CL
+        TopicArn: !Ref AppointmentTopic
+        FilterPolicy: # Filtro crucial: solo acepta mensajes con countryISO: "CL"
+          countryISO:
+            - "CL"
+ 
+  #este bloque permite que la informacion de los recursos creado (como ARNs y urls) sean accesibles desde fuera
+  #o utilizados internamente por otros recursos del mismo proyecto 
+  Outputs: 
+    #permite que se pueda referenciar al nombre de estos elementos desde funciones lambda, event bridge, etc
+    SqsPeArn:
+      #obtiene el Arn del recurso
+      Value: !GetAtt SqsPe.Arn
+      #hace que el Arn sea publico dentro de nuestra cuenta AWS bajo el nombre especificado
+      Export:
+        Name: ${self:service}-SqsPeArn
+
+    SqsClArn:
+      Value: !GetAtt SqsCl.Arn
+      Export:
+        Name: ${self:service}-SqsClArn
+
+    AppointmentTopicArn:
+      Value: !Ref AppointmentTopic
+      Export:
+        Name: ${self:service}-AppointmentTopicArn
 
 functions:
   hello:
