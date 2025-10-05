@@ -11,6 +11,7 @@ provider:
   environment:
     APPOINTMENT_TOPIC_ARN: !ImportValue ${self:service}-AppointmentTopicArn #Arn del tópico SNS
     APPOINTMENTS_TABLE_NAME: !Ref AppointmentsTable
+    INSURED_ID_GSI_NAME: InsuredIdIndex 
 
 resources:
   Resources:
@@ -143,6 +144,9 @@ functions:
       - httpApi:
         path: /appointment
         method: post
+      - httpApi:
+        path: /appointment/{insuredId}
+        method: get
     iamRoleStatements:
       # Permisos para DynamoDB (guardar la petición inicial y el estado final)
       - Effect: Allow
