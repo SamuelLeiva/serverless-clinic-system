@@ -4,14 +4,17 @@ import { DynamoDBRepository } from "../database/DynamoDBRepository";
 import { SnsService } from "../aws/snsService";
 import { RegisterAppointmentUseCase } from "../../app/use-cases/registerAppointmentUseCase";
 import { ListAppointmentsUseCase } from "../../app/use-cases/listAppointmentsUseCase";
+import { UuidGenerator } from "../utils/uuidGenerator";
 
 // Zona global de inicialización
 const appointmentRepository = new DynamoDBRepository();
 const snsService = new SnsService();
+const idGenerator = new UuidGenerator();
 
 const registerAppointmentUseCase = new RegisterAppointmentUseCase(
   appointmentRepository,
-  snsService
+  snsService,
+  idGenerator
 );
 
 const listAppointmentsUseCase = new ListAppointmentsUseCase(
