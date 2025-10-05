@@ -11,7 +11,7 @@ provider:
   environment:
     APPOINTMENT_TOPIC_ARN: !ImportValue ${self:service}-AppointmentTopicArn #Arn del tópico SNS
     APPOINTMENTS_TABLE_NAME: !Ref AppointmentsTable
-    INSURED_ID_GSI_NAME: InsuredIdIndex 
+    INSURED_ID_GSI_NAME: InsuredIdIndex
 
 resources:
   Resources:
@@ -166,6 +166,40 @@ functions:
           - sns:Publish
         Resource: !Ref AppointmentTopic # Referencia al tópico creado en Commit 3
 
+  appointment_pe:
+    handler: src/adapters/handlers/country/peHandler.handler
+    name: AppointmentProcessorPE-${sls:stage}
+    timeout: 30 # Tiempo de espera para la DB simulada
+    environment:
+      MYSQL_PE_HOST: ${ssm:mysql-pe-host-${sls:stage}} # Ejemplo de SSM Parameter Store
+      EVENT_BRIDGE_SOURCE: appointment.service # Fuente del evento para EventBridge
+    events:
+      - sqs: # Trigger SQS para Perú
+          arn: !ImportValue ${self:service}-SqsPeArn
+          batchSize: 1 # Procesar un mensaje a la vez (por seguridad)
+    iamRoleStatements:
+      # Permiso crucial para enviar el evento de conformidad a EventBridge
+      - Effect: Allow
+        Action:
+          - events:PutEvents
+        Resource: "*" # Permiso para escribir en el bus de eventos 'default'
+
+  appointment_cl:
+    handler: src/adapters/handlers/country/clHandler.handler
+    name: AppointmentProcessorCL-${sls:stage}
+    timeout: 30
+    environment:
+      MYSQL_CL_HOST: ${ssm:mysql-cl-host-${sls:stage}}
+      EVENT_BRIDGE_SOURCE: appointment.service
+    events:
+      - sqs: # Trigger SQS para Chile
+          arn: !ImportValue ${self:service}-SqsClArn
+          batchSize: 1
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - events:PutEvents
+        Resource: "*"
 
 # Build nativo en Serverless v4 (reemplaza serverless-esbuild)
 build:
