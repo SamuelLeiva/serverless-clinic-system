@@ -8,6 +8,9 @@ provider:
   name: aws
   runtime: nodejs20.x
   region: us-east-1
+  environment:
+    APPOINTMENT_TOPIC_ARN: !ImportValue ${self:service}-AppointmentTopicArn #Arn del tópico SNS
+    APPOINTMENTS_TABLE_NAME: !Ref AppointmentsTable
 
 resources:
   Resources:
