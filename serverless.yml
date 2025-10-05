@@ -1,11 +1,37 @@
-service: serverless-ts-v4
+org: lpilas
 
-frameworkVersion: '4'
+service: appointments-app
+
+frameworkVersion: "4"
 
 provider:
   name: aws
   runtime: nodejs20.x
   region: us-east-1
+
+resources:
+  Resources:
+    AppointmentsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: Appointments
+        KeySchema:
+          - AttributeName: id
+            AttributeType: S
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: insuredId
+            AttributeType: S
+        BillingMode: PAY_PER_REQUEST
+
+        GlobalSecondaryIndexes: # se define para permitir consultas que no usan la llave principal
+          - IndexName: InsuredIdIndex # El índice secundario global para la consulta de listado
+            KeySchema:
+              - AttributeName: insuredId
+                KeyType: HASH # Clave de Partición para el GSI
+            Projection:
+              ProjectionType: ALL # Proyecta todos los atributos para que el listado sea completo
 
 functions:
   hello:
