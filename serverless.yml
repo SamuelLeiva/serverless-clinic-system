@@ -1,19 +1,209 @@
-service: serverless-ts-v4
+org: lpilas
 
-frameworkVersion: '4'
+service: appointments-app
+
+frameworkVersion: "4"
 
 provider:
   name: aws
   runtime: nodejs20.x
   region: us-east-1
+  environment:
+    APPOINTMENT_TOPIC_ARN: !ImportValue ${self:service}-AppointmentTopicArn #Arn del tópico SNS
+    APPOINTMENTS_TABLE_NAME: !Ref AppointmentsTable
+    INSURED_ID_GSI_NAME: InsuredIdIndex
+
+resources:
+  Resources:
+    AppointmentsTable: #Declaración de la tabla en DynamoDB
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: Appointments
+        KeySchema:
+          - AttributeName: id
+            AttributeType: S
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+          - AttributeName: insuredId
+            AttributeType: S
+        BillingMode: PAY_PER_REQUEST
+
+        GlobalSecondaryIndexes: # se define para permitir consultas que no usan la llave principal
+          - IndexName: InsuredIdIndex # El índice secundario global para la consulta de listado
+            KeySchema:
+              - AttributeName: insuredId
+                KeyType: HASH # Clave de Partición para el GSI
+            Projection:
+              ProjectionType: ALL # Proyecta todos los atributos para que el listado sea completo
+
+    AppointmentTopic: #Declaración del topico SNS
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: appointment-request-topic-${sls:stage}
+
+    SqsPe: #Cola de mensajes de Perú
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: appointment-request-pe-queue-${sls:stage}
+        MessageRetentionPeriod: 1209600 # 14 días (opcional)
+
+    SqsCl: #Cola de mensajes de Chile
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: appointment-request-cl-queue-${sls:stage}
+        MessageRetentionPeriod: 1209600
+
+    #Suscripción de las colas al SNS previamente creado
+    SqsPeSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: sqs
+        Endpoint: !GetAtt SqsPe.Arn # Obtiene el ARN de la cola PE creada arriba
+        TopicArn: !Ref AppointmentTopic # Hace referencia al Tópico SNS
+        FilterPolicy: # Filtro crucial: solo acepta mensajes con countryISO: "PE"
+          countryISO:
+            - "PE"
+    SqsClSubscription:
+      Type: AWS::SNS::Subscription
+      Properties:
+        Protocol: sqs
+        Endpoint: !GetAtt SqsCl.Arn # Obtiene el ARN de la cola CL
+        TopicArn: !Ref AppointmentTopic
+        FilterPolicy: # Filtro crucial: solo acepta mensajes con countryISO: "CL"
+          countryISO:
+            - "CL"
+
+    SqsReturn: # cola SQS de retorno
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: appointment-return-queue-${sls:stage}
+        MessageRetentionPeriod: 86400 # 1 día de retención
+
+    AppointmentCompletionRule: #Regla de EventBridge
+      Type: AWS::Events::Rule
+      Properties:
+        Name: AppointmentCompletionRule-${sls:stage}
+        EventBusName: default # Usamos el bus de eventos por defecto de AWS
+        EventPattern: # El patrón de evento que estaremos escuchando
+          source:
+            - "appointment.service" # El servicio que emite el evento
+          detail-type:
+            - "AppointmentCompleted" # El tipo de evento
+        Targets:
+          - Arn: !GetAtt SqsReturn.Arn # El destino es el ARN de la cola de retorno
+            Id: SqsReturnTarget
+
+    SqsReturnPolicy: # política SQS para permitir que EventBridge escriba en la cola
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - !Ref SqsReturn
+        PolicyDocument:
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: events.amazonaws.com # Permite a EventBridge enviar mensajes
+              Action: SQS:SendMessage
+              Resource: !GetAtt SqsReturn.Arn
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: !GetAtt AppointmentCompletionRule.Arn # Restringe el permiso solo a esta regla
+
+  #este bloque permite que la informacion de los recursos creado (como ARNs y urls) sean accesibles desde fuera
+  #o utilizados internamente por otros recursos del mismo proyecto
+  Outputs:
+    #permite que se pueda referenciar al nombre de estos elementos desde funciones lambda, event bridge, etc
+    SqsPeArn:
+      #obtiene el Arn del recurso
+      Value: !GetAtt SqsPe.Arn
+      #hace que el Arn sea publico dentro de nuestra cuenta AWS bajo el nombre especificado
+      Export:
+        Name: ${self:service}-SqsPeArn
+
+    SqsClArn:
+      Value: !GetAtt SqsCl.Arn
+      Export:
+        Name: ${self:service}-SqsClArn
+
+    AppointmentTopicArn:
+      Value: !Ref AppointmentTopic
+      Export:
+        Name: ${self:service}-AppointmentTopicArn
+
+    SqsReturnArn:
+      Value: !GetAtt SqsReturn.Arn
+      Export:
+        Name: ${self:service}-SqsReturnArn
 
 functions:
-  hello:
-    handler: src/handler.hello
+  appointment:
+    handler: src/adapters/handlers/appointmentHandler.handler
+    name: AppointmentServiceLambda-${sls:stage}
     events:
       - httpApi:
-          path: /
-          method: get
+        path: /appointment
+        method: post
+      - httpApi:
+        path: /appointment/{insuredId}
+        method: get
+      - sqs: # Trigger para consumir la cola de retorno
+        arn: !ImportValue ${self:service}-SqsReturnArn
+        batchSize: 1
+        handler: src/adapters/handlers/appointmentHandler.sqsHandler
+    iamRoleStatements:
+      # Permisos para DynamoDB (guardar la petición inicial y el estado final)
+      - Effect: Allow
+        Action:
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
+          - dynamodb:Query
+        Resource:
+          - !GetAtt AppointmentsTable.Arn
+          - !Join [
+              "/",
+              [!GetAtt AppointmentsTable.Arn, "index", "InsuredIdIndex"],
+            ] # Permiso para el GSI
+      # Permiso para SNS (publicar el mensaje al tópico)
+      - Effect: Allow
+        Action:
+          - sns:Publish
+        Resource: !Ref AppointmentTopic # Referencia al tópico creado en Commit 3
+
+  appointment_pe:
+    handler: src/adapters/handlers/country/peHandler.handler
+    name: AppointmentProcessorPE-${sls:stage}
+    timeout: 30 # Tiempo de espera para la DB simulada
+    environment:
+      MYSQL_PE_HOST: 'rds-host-pe-simulado.com' # BD simulada
+      EVENT_BRIDGE_SOURCE: appointment.service # Fuente del evento para EventBridge
+    events:
+      - sqs: # Trigger SQS para Perú
+          arn: !ImportValue ${self:service}-SqsPeArn
+          batchSize: 1 # Procesar un mensaje a la vez (por seguridad)
+    iamRoleStatements:
+      # Permiso crucial para enviar el evento de conformidad a EventBridge
+      - Effect: Allow
+        Action:
+          - events:PutEvents
+        Resource: "*" # Permiso para escribir en el bus de eventos 'default'
+
+  appointment_cl:
+    handler: src/adapters/handlers/country/clHandler.handler
+    name: AppointmentProcessorCL-${sls:stage}
+    timeout: 30
+    environment:
+      MYSQL_CL_HOST: 'rds-host-cl-simulado.com' # BD simulada
+      EVENT_BRIDGE_SOURCE: appointment.service
+    events:
+      - sqs: # Trigger SQS para Chile
+          arn: !ImportValue ${self:service}-SqsClArn
+          batchSize: 1
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - events:PutEvents
+        Resource: "*"
 
 # Build nativo en Serverless v4 (reemplaza serverless-esbuild)
 build:
