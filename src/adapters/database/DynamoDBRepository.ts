@@ -1,5 +1,5 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { IAppointmentRepository } from "../../app/ports/appointmentRepository";
 import { Appointment, AppointmentRequest } from "../../types/appointment";
 
@@ -47,5 +47,23 @@ export class DynamoDBRepository implements IAppointmentRepository {
     });
 
     await ddbDocClient.send(command);
+  }
+
+  async updateStatus(id: string, newStatus: "completed"): Promise<void> {
+    const command = new UpdateCommand({
+            TableName: TABLE_NAME,
+            Key: { id },
+            UpdateExpression: 'SET #status = :s, updatedAt = :u',
+            ExpressionAttributeNames: {
+                '#status': 'status',
+            },
+            ExpressionAttributeValues: {
+                ':s': newStatus,
+                ':u': new Date().toISOString(),
+            },
+            ReturnValues: 'ALL_NEW',
+        });
+
+        await ddbDocClient.send(command);
   }
 }

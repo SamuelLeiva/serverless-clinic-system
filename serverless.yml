@@ -147,6 +147,9 @@ functions:
       - httpApi:
         path: /appointment/{insuredId}
         method: get
+      - sqs: # Trigger para consumir la cola de retorno
+        arn: !ImportValue ${self:service}-SqsReturnArn
+        batchSize: 1
     iamRoleStatements:
       # Permisos para DynamoDB (guardar la petición inicial y el estado final)
       - Effect: Allow
