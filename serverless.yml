@@ -175,7 +175,7 @@ functions:
     name: AppointmentProcessorPE-${sls:stage}
     timeout: 30 # Tiempo de espera para la DB simulada
     environment:
-      MYSQL_PE_HOST: ${ssm:mysql-pe-host-${sls:stage}} # Ejemplo de SSM Parameter Store
+      MYSQL_PE_HOST: 'rds-host-pe-simulado.com' # BD simulada
       EVENT_BRIDGE_SOURCE: appointment.service # Fuente del evento para EventBridge
     events:
       - sqs: # Trigger SQS para Perú
@@ -193,7 +193,7 @@ functions:
     name: AppointmentProcessorCL-${sls:stage}
     timeout: 30
     environment:
-      MYSQL_CL_HOST: ${ssm:mysql-cl-host-${sls:stage}}
+      MYSQL_CL_HOST: 'rds-host-cl-simulado.com' # BD simulada
       EVENT_BRIDGE_SOURCE: appointment.service
     events:
       - sqs: # Trigger SQS para Chile
