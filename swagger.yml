@@ -1,0 +1,112 @@
+# openapi.yml
+
+openapi: 3.0.0
+info:
+  title: Servicio de Agendamiento de Citas
+  version: 1.0.0
+  description: API Backend para el agendamiento y consulta asíncrona de citas médicas.
+
+servers:
+  - url: /
+    description: Despliegue en AWS Lambda/API Gateway
+
+paths:
+  /appointment:
+    post:
+      summary: Inicia el agendamiento de una cita (asíncrono).
+      description: Guarda la cita en estado 'pending' y publica un evento SNS.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppointmentRequest"
+      responses:
+        "202":
+          description: Aceptado. El procesamiento es asíncrono.
+        "400":
+          description: Petición inválida (fallo en validación).
+
+  /appointment/{insuredId}:
+    get:
+      summary: Consulta el estado de las citas de un asegurado.
+      description: Busca todas las citas en DynamoDB por el GSI 'InsuredIdIndex'.
+      parameters:
+        - in: path
+          name: insuredId
+          required: true
+          schema:
+            type: string
+            minLength: 5
+            maxLength: 5
+          description: Código del asegurado.
+      responses:
+        "200":
+          description: Lista de citas encontradas.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Appointment"
+        "400":
+          description: ID del asegurado con formato incorrecto.
+
+components:
+  schemas:
+    AppointmentRequest:
+      type: object
+      properties:
+        insuredId:
+          type: string
+          example: "12345"
+        scheduleId:
+          type: number
+          example: 100
+        countryISO:
+          type: string
+          enum: ["PE", "CL"]
+          example: "PE"
+        centerId:
+          type: number
+          description: Identificador del centro médico (Opcional).
+          example: 4
+        specialtyId:
+          type: number
+          description: Identificador de la especialidad (Opcional).
+          example: 3
+        medicId:
+          type: number
+          description: Identificador del médico (Opcional).
+          example: 4
+        date:
+          type: string
+          format: date-time
+          description: Fecha y hora de la cita (Opcional).
+          example: "2025-10-15T10:00:00Z"
+      required: [insuredId, scheduleId, countryISO]
+
+    Appointment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        insuredId:
+          type: string
+        status:
+          type: string
+          enum: ["pending", "completed"]
+        createdAt:
+          type: string
+          format: date-time
+        centerId:
+          type: number
+        specialtyId:
+          type: number
+        medicId:
+          type: number
+        date:
+          type: string
+          format: date-time
+      required: [id, insuredId, status, createdAt]
