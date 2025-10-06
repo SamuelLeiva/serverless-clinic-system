@@ -9,7 +9,7 @@ provider:
   runtime: nodejs20.x
   region: us-east-1
   environment:
-    APPOINTMENT_TOPIC_ARN: !ImportValue ${self:service}-AppointmentTopicArn #Arn del tópico SNS
+    APPOINTMENT_TOPIC_ARN: !Ref AppointmentTopic
     APPOINTMENTS_TABLE_NAME: !Ref AppointmentsTable
     INSURED_ID_GSI_NAME: InsuredIdIndex
 
@@ -21,7 +21,7 @@ resources:
         TableName: Appointments
         KeySchema:
           - AttributeName: id
-            AttributeType: S
+            KeyType: HASH
         AttributeDefinitions:
           - AttributeName: id
             AttributeType: S
@@ -63,7 +63,7 @@ resources:
         TopicArn: !Ref AppointmentTopic # Hace referencia al Tópico SNS
         FilterPolicy: # Filtro crucial: solo acepta mensajes con countryISO: "PE"
           countryISO:
-            - "PE"
+            - PE
     SqsClSubscription:
       Type: AWS::SNS::Subscription
       Properties:
@@ -72,7 +72,7 @@ resources:
         TopicArn: !Ref AppointmentTopic
         FilterPolicy: # Filtro crucial: solo acepta mensajes con countryISO: "CL"
           countryISO:
-            - "CL"
+            - CL
 
     SqsReturn: # cola SQS de retorno
       Type: AWS::SQS::Queue
@@ -93,6 +93,39 @@ resources:
         Targets:
           - Arn: !GetAtt SqsReturn.Arn # El destino es el ARN de la cola de retorno
             Id: SqsReturnTarget
+
+    #Políticas de las colas
+    SqsPePolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - !Ref SqsPe
+        PolicyDocument:
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: sns.amazonaws.com
+              Action: SQS:SendMessage
+              Resource: !GetAtt SqsPe.Arn
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: !Ref AppointmentTopic
+
+    SqsClPolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - !Ref SqsCl
+        PolicyDocument:
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: sns.amazonaws.com
+              Action: SQS:SendMessage
+              Resource: !GetAtt SqsCl.Arn
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: !Ref AppointmentTopic
 
     SqsReturnPolicy: # política SQS para permitir que EventBridge escriba en la cola
       Type: AWS::SQS::QueuePolicy
@@ -142,15 +175,11 @@ functions:
     name: AppointmentServiceLambda-${sls:stage}
     events:
       - httpApi:
-        path: /appointment
-        method: post
+          path: /appointment
+          method: post
       - httpApi:
-        path: /appointment/{insuredId}
-        method: get
-      - sqs: # Trigger para consumir la cola de retorno
-        arn: !ImportValue ${self:service}-SqsReturnArn
-        batchSize: 1
-        handler: src/adapters/handlers/appointmentHandler.sqsHandler
+          path: /appointment/{insuredId}
+          method: get
     iamRoleStatements:
       # Permisos para DynamoDB (guardar la petición inicial y el estado final)
       - Effect: Allow
@@ -175,11 +204,11 @@ functions:
     name: AppointmentProcessorPE-${sls:stage}
     timeout: 30 # Tiempo de espera para la DB simulada
     environment:
-      MYSQL_PE_HOST: 'rds-host-pe-simulado.com' # BD simulada
+      MYSQL_PE_HOST: "rds-host-pe-simulado.com" # BD simulada
       EVENT_BRIDGE_SOURCE: appointment.service # Fuente del evento para EventBridge
     events:
       - sqs: # Trigger SQS para Perú
-          arn: !ImportValue ${self:service}-SqsPeArn
+          arn: !GetAtt SqsPe.Arn
           batchSize: 1 # Procesar un mensaje a la vez (por seguridad)
     iamRoleStatements:
       # Permiso crucial para enviar el evento de conformidad a EventBridge
@@ -193,17 +222,32 @@ functions:
     name: AppointmentProcessorCL-${sls:stage}
     timeout: 30
     environment:
-      MYSQL_CL_HOST: 'rds-host-cl-simulado.com' # BD simulada
+      MYSQL_CL_HOST: "rds-host-cl-simulado.com" # BD simulada
       EVENT_BRIDGE_SOURCE: appointment.service
     events:
       - sqs: # Trigger SQS para Chile
-          arn: !ImportValue ${self:service}-SqsClArn
+          arn: !GetAtt SqsCl.Arn
           batchSize: 1
     iamRoleStatements:
       - Effect: Allow
         Action:
           - events:PutEvents
         Resource: "*"
+
+  appointmentSqs:
+    # Handler ÚNICO para SQS
+    handler: src/adapters/handlers/appointmentHandler.sqsHandler
+    name: AppointmentServiceLambdaSqs-${sls:stage}
+    events:
+      - sqs:
+          arn: !GetAtt SqsReturn.Arn
+          batchSize: 1
+    iamRoleStatements:
+      # Esta función solo necesita el permiso para actualizar DynamoDB (UpdateItem)
+      - Effect: Allow
+        Action:
+          - dynamodb:UpdateItem
+        Resource: !GetAtt AppointmentsTable.Arn
 
 # Build nativo en Serverless v4 (reemplaza serverless-esbuild)
 build:
