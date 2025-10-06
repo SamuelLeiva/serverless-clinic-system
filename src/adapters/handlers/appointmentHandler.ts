@@ -1,10 +1,11 @@
-import { APIGatewayProxyHandlerV2 } from "aws-lambda";
+import { APIGatewayProxyHandlerV2, SQSEvent, SQSHandler } from "aws-lambda";
 import { AppointmentRequest } from "../../types/appointment";
 import { DynamoDBRepository } from "../database/DynamoDBRepository";
 import { SnsService } from "../aws/snsService";
 import { RegisterAppointmentUseCase } from "../../app/use-cases/registerAppointmentUseCase";
 import { ListAppointmentsUseCase } from "../../app/use-cases/listAppointmentsUseCase";
 import { UuidGenerator } from "../utils/uuidGenerator";
+import { CompleteAppointmentUseCase } from "../../app/use-cases/completeAppointmentUseCase";
 
 // Zona global de inicialización
 const appointmentRepository = new DynamoDBRepository();
@@ -20,6 +21,8 @@ const registerAppointmentUseCase = new RegisterAppointmentUseCase(
 const listAppointmentsUseCase = new ListAppointmentsUseCase(
   appointmentRepository
 );
+
+const completeAppointmentUseCase = new CompleteAppointmentUseCase(appointmentRepository)
 
 // Función de utilidad para validar la entrada
 function validateRequest(body: any): AppointmentRequest {
@@ -38,6 +41,32 @@ function validateRequest(body: any): AppointmentRequest {
   // El objeto validado cumple con la interfaz AppointmentRequest
   return { insuredId, scheduleId, countryISO } as AppointmentRequest;
 }
+
+// HANDLER ESPECÍFICO PARA SQS
+export const sqsHandler: SQSHandler = async (event: SQSEvent) => {
+    for (const record of event.Records) {
+        try {
+            // El mensaje de SQS viene de EventBridge, que envía el objeto Detail
+            const ebMessage = JSON.parse(record.body);
+            const detail = JSON.parse(ebMessage.detail);
+            const appointmentId = detail.appointmentId;
+            
+            if (!appointmentId) {
+                console.error("Mensaje de conformidad sin appointmentId, ignorando.");
+                continue; 
+            }
+
+            // Ejecución del Caso de Uso para cerrar el ciclo
+            await completeAppointmentUseCase.execute(appointmentId);
+            console.log(`Cita ${appointmentId} actualizada a 'completed' en DynamoDB.`);
+
+        } catch (error) {
+            console.error(`Error procesando mensaje SQS de retorno: ${error}`);
+            throw error; // Esto hace que SQS reintente el mensaje
+        }
+    }
+}
+
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const method = event.requestContext.http.method; // Obtener el método HTTP y path
