@@ -1,4 +1,4 @@
-# 🏥 Appointments Processing Service (appointments-app)
+# 🏥 Appointments Processing Service
 
 This repository contains the source code for an asynchronous appointment scheduling and processing service built using Serverless Framework and deployed on AWS Lambda (Node.js/TypeScript).
 
